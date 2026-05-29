@@ -1,0 +1,36 @@
+# Configuration for Ising CNN experiment
+# All physics / training hyperparameters live here.
+
+# ----- Physics -----
+M0: 0.0                  # conserved magnetization density (0 = balanced)
+T_c: 2.269185314213022   # Onsager value, 2 / log(1 + sqrt(2))
+
+# Lattice sizes to run
+Ls: [20, 30, 40]
+
+# Temperature grid: 30 points concentrated around T_c
+# Built in 01_generate_mc.py via numpy.linspace([T_min, T_max], n_T)
+T_min: 1.0
+T_max: 3.5
+n_T: 30
+
+# ----- Monte Carlo -----
+n_configs_per_T: 20000       # samples per (L, T) — paper used 10^5
+n_thermalize_sweeps: 2000    # MC sweeps for thermalization
+decorrelation_base: 30       # baseline sweeps between snapshots
+# Near T_c, decorrelation is multiplied by ~L^z (Kawasaki z ~ 2.17).
+# See src/mc.py:decorrelation_sweeps.
+
+# ----- CNN training -----
+lr: 1.0e-3
+batch_size: 128
+max_epochs: 60
+patience: 3              # early-stopping patience in epochs
+circular_padding: true   # use periodic conv padding (physically consistent)
+
+# Random seed for splits and initialization
+seed: 42
+
+# ----- I/O -----
+data_dir: "data/raw"
+results_dir: "data/results"
