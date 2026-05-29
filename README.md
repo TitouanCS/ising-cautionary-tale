@@ -1,181 +1,208 @@
-# Ising-CNN — Réimplémentation de la partie CNN de Azizi & Pleimling (2021)
+# Ising-CNN: a reproduction of Azizi & Pleimling (2021)
 
-Reproduction de la partie « apprentissage supervisé » de l'article *A cautionary
-tale for machine learning generated configurations in presence of a conserved
-quantity* (Sci. Rep. 11:6395, 2021).
+A reimplementation of the supervised-learning part of
+*A Cautionary Tale for Machine Learning Generated Configurations in the
+Presence of a Conserved Quantity* (A. Azizi and M. Pleimling, *Scientific
+Reports* **11**:6395, 2021).
 
-On entraîne un CNN à classifier des configurations du modèle d'Ising 2D avec
-magnétisation conservée ($M_0 = 0$, dynamique de Kawasaki) en deux classes :
-phase ordonnée ($T < T_c$) ou désordonnée ($T > T_c$). On montre ensuite que
-la sortie moyenne du CNN, $\langle p_{\text{ordonné}} \rangle(T)$, exhibe un
-*finite-size scaling* gouverné par l'exposant critique $\nu = 1$ de l'Ising 2D.
+A convolutional neural network is trained to classify configurations of the
+2D Ising model with **conserved magnetization** ($M_0 = 0$, Kawasaki
+dynamics) into ordered ($T < T_c$) and disordered ($T > T_c$) phases.
+The average CNN output $\langle p_{\text{ordered}}\rangle(T)$ is then shown
+to exhibit a finite-size scaling collapse governed by the 2D Ising
+correlation-length exponent $\nu = 1$.
 
 ---
 
 ## Pipeline
 
-1. **Génération MC** (Numba) : pour chaque $(L, T)$, on tire $N$ configurations
-   avec une chaîne Kawasaki (échange de spins voisins, accept/reject Metropolis).
-   La magnétisation est exactement conservée. Décorrélation entre snapshots
-   ajustée près de $T_c$ pour tenir compte du *critical slowing down*.
+1. **Monte Carlo generation** (Numba). For each $(L, T)$, $N$ configurations
+   are sampled by a Kawasaki Markov chain: nearest-neighbour spin exchanges
+   with Metropolis accept/reject. Magnetization is conserved exactly.
+   Decorrelation between snapshots is increased near $T_c$ to account for
+   critical slowing down.
 
-2. **Entraînement CNN** (PyTorch) : un modèle par taille $L$. Architecture
-   2 × (Conv 3×3 + MaxPool 2×2) + Dense → 2 (softmax). Padding circulaire pour
-   respecter les conditions périodiques. Cross-entropy + Adam, early stopping
-   sur la validation.
+2. **CNN training** (PyTorch). One model per system size $L$. Architecture:
+   2 × (Conv 3×3 + MaxPool 2×2) + Dense → 2 (softmax). Circular padding for
+   the periodic boundary conditions. Cross-entropy loss, Adam optimizer,
+   early stopping on validation accuracy.
 
-3. **Analyse** (SciPy + matplotlib) : tracé de $\langle p \rangle(T)$ par $L$,
-   estimation de $T_c$ par le croisement à 0.5, fit conjoint de $T_c$ et $\nu$
-   par minimisation de la dispersion *collapse* sur la variable rééchelonnée
-   $(T - T_c) L^{1/\nu}$.
+3. **Analysis** (SciPy + matplotlib). Plot $\langle p\rangle(T)$ for each
+   $L$, estimate $T_c$ from the $0.5$-crossing, and jointly fit $T_c$ and
+   $\nu$ by minimizing the collapse dispersion on the rescaled variable
+   $(T - T_c)L^{1/\nu}$.
 
 ---
 
-## Arborescence
+## Repository structure
 
 ```
 ising_cnn/
 ├── README.md
 ├── requirements.txt
-├── configs/default.yaml         # hyperparamètres physiques et d'entraînement
+├── configs/
+│   └── default.yaml             # physical and training hyperparameters
 ├── src/
-│   ├── mc.py                    # Monte Carlo Kawasaki (Numba)
+│   ├── mc.py                    # Kawasaki Monte Carlo (Numba)
 │   ├── model.py                 # CNN
 │   ├── dataset.py               # PyTorch Datasets
-│   ├── train.py                 # boucle d'entraînement
+│   ├── train.py                 # training loop
 │   └── analysis.py              # finite-size scaling
 ├── scripts/
-│   ├── 00_smoke_test.py         # test rapide bout-en-bout (1 min sur laptop)
-│   ├── 01_generate_mc.py        # génération MC (parallélisable SLURM array)
-│   ├── 02_train_cnn.py          # entraînement CNN
-│   ├── 03_analyze.py            # plots + fit collapse
-│   └── slurm/
-│       ├── gen_mc.sbatch
-│       └── train.sbatch
-└── data/                        # créé à l'exécution
-    ├── raw/                     # configurations MC (.npz)
-    └── results/                 # poids CNN, courbes, figures
+│   ├── 00_smoke_test.py         # quick end-to-end test (~1 min on laptop)
+│   ├── 01_generate_mc.py        # MC generation
+│   ├── 02_train_cnn.py          # CNN training
+│   └── 03_analyze.py            # plots + collapse fit
+└── data/                        # created at runtime
+    ├── raw/                     # MC configurations (.npz)
+    └── results/                 # CNN weights, curves, figures
 ```
 
 ---
 
-## Utilisation
+## Installation
 
-### Installation
+Requires Python 3.9+.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+git clone https://github.com/TitouanCS/ising-cautionary-tale.git
+cd ising-cautionary-tale
+python -m venv .venv
+source .venv/bin/activate          # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Smoke test (local, ~1 minute)
+---
+
+## Quick start — smoke test (~1 min)
+
+Before running the full pipeline, validate the chain end-to-end on a small
+system ($L = 8$):
 
 ```bash
 python scripts/00_smoke_test.py
 ```
 
-À utiliser **avant** de soumettre quoi que ce soit sur le DCE. Vérifie que la
-chaîne MC tourne, que la magnétisation est conservée, et que le CNN apprend
-une sigmoïde dans la bonne plage.
+This checks that (i) the Kawasaki Monte Carlo conserves magnetization,
+(ii) the CNN learns a sigmoid in the expected range, and (iii) all I/O
+paths are correctly set up.
 
-### Sur le DCE — flux complet
+---
 
-Le DCE impose **max 1 job par utilisateur**, donc pas de SLURM array. On
-utilise un seul job par étape, qui parallélise en interne.
+## Full pipeline
 
-Partitions utilisées :
-- **`cpu_prod`** (nœuds `kyle`, SkyLake 2×8 cœurs, 64 GB, walltime 12h) → MC
-- **`cpu_inter`** (walltime 2h, autorise `srun`/`salloc`) → smoke test interactif
+The three stages are run sequentially. All hyperparameters (system sizes,
+temperature grid, number of configurations, training schedule) live in
+`configs/default.yaml`.
 
-1. **Lister les tâches MC** pour vérifier la configuration (3 tailles × 30 températures = 90 tâches) :
-   ```bash
-   python scripts/01_generate_mc.py --list-tasks
-   ```
+### 1. Generate Monte Carlo configurations
 
-2. **Soumettre le job MC** (un seul, ~30 min - 2h walltime selon la machine) :
-   ```bash
-   sbatch scripts/slurm/gen_mc.sbatch
-   ```
-   Le script demande 16 cœurs sur un nœud `kyle` et lance 16 tâches MC en
-   parallèle via `multiprocessing.Pool`. Les tâches les plus lourdes (grand
-   $L$, $T$ proche de $T_c$) sont schedulées en premier pour minimiser le
-   *tail effect*.
-
-3. **Soumettre le training** (une fois la MC terminée) :
-   ```bash
-   sbatch scripts/slurm/train.sbatch
-   ```
-   Entraîne les 3 CNN séquentiellement sur CPU (~15 min total). Si tu veux
-   utiliser un GPU, change `--partition` et ajoute `--gres=gpu:1` dans le
-   sbatch — PyTorch détecte le GPU automatiquement.
-
-4. **Analyse** (peut tourner sur le frontend ou en local après rapatriement) :
-   ```bash
-   python scripts/03_analyze.py --config configs/default.yaml
-   ```
-
-### Smoke test interactif sur le DCE
-
-Si tu veux valider le pipeline avant le gros run :
 ```bash
-salloc --partition=cpu_inter --cpus-per-task=4 --time=00:30:00
-# une fois sur le nœud :
-python scripts/00_smoke_test.py
+python scripts/01_generate_mc.py --config configs/default.yaml
 ```
 
-### Sortie attendue
+Generates configurations in parallel across CPU cores using
+`multiprocessing.Pool`. The heaviest tasks (large $L$, $T$ near $T_c$)
+are scheduled first to minimize tail effects. Output written to
+`data/raw/`.
 
-Dans `data/results/` :
-- `fig_pT.png` — courbes $\langle p \rangle(T)$ pour les trois $L$, avec zoom
-  autour de $T_c$.
-- `fig_collapse.png` — collapse $\langle p \rangle$ vs $(T - T_c) L^{1/\nu}$.
-  Les trois courbes doivent se superposer.
-- `summary.json` — $T_c$ et $\nu$ fittés, accuracies de test.
+### 2. Train the CNNs
 
-Valeurs attendues à la convergence :
-- $T_c^{\text{fit}} \approx 2.27$ (vs. Onsager exact $\approx 2.2692$)
-- $\nu \approx 1.0$
-- accuracy test $\geq 0.97$ pour $L \geq 30$
+```bash
+python scripts/02_train_cnn.py --config configs/default.yaml
+```
 
----
+Trains one CNN per system size sequentially. PyTorch will automatically
+detect and use a GPU if available; otherwise it runs on CPU. Trained
+weights and per-epoch metrics written to `data/results/`.
 
-## Estimation du coût (DCE, partition cpu_prod sur kyle)
+### 3. Produce figures and fit the collapse
 
-Avec `n_configs_per_T = 20000` (au lieu des $10^5$ du papier) :
+```bash
+python scripts/03_analyze.py --config configs/default.yaml
+```
 
-| $L$  | Temps MC / température (1 cœur Numba, kyle) | × 30 températures (séquentiel) |
-|------|----------------------------------------------|------------------------------------|
-| 20   | ~10 s                                        | ~5 min                             |
-| 30   | ~1 min                                       | ~25 min                            |
-| 40   | ~5 min                                       | ~1h30                              |
+Outputs in `data/results/`:
+- `fig_pT.png` — $\langle p\rangle(T)$ for each $L$, with a zoom around
+  $T_c$.
+- `fig_collapse.png` — collapse $\langle p\rangle$ vs.\
+  $(T - T_c)L^{1/\nu}$ with the fitted exponents.
+- `summary.json` — fitted $T_c$ and $\nu$, plus test accuracies.
 
-Avec **16 cœurs en parallèle** sur un nœud `kyle` (multiprocessing) : walltime
-total ~**15-30 min** suivant la charge réelle du critical slowing down.
-
-Entraînement CNN : quelques minutes par $L$ sur CPU 8 cœurs, plus rapide si tu
-réquisitionnes un GPU à la place.
-
----
-
-## Choix d'implémentation par rapport au papier
-
-| Choix                              | Papier | Cette implémentation |
-|------------------------------------|--------|----------------------|
-| Configs par $(L, T)$               | $10^5$ | $2 \times 10^4$ (config) |
-| Tailles $L$                        | 20, 30, 40, 50 | 20, 30, 40 (config) |
-| Grille de $T$                      | 23 points $[1.0, 3.2]$ | 30 points $[1.0, 3.5]$ (config) |
-| Padding conv                       | non précisé | circulaire (périodique) |
-| Décorrélation entre snapshots      | non précisé | adaptative près de $T_c$ |
-| Critère d'arrêt                    | 3 epochs sans amélioration val | idem |
+Expected values at convergence:
+- $T_c^{\text{fit}} \approx 2.27$ (exact Onsager value: $\approx 2.2692$)
+- $\nu \approx 1.0$ for the asymptotic regime; finite-size effects on
+  small $L$ may yield slightly lower values ($\sim 0.82$ for
+  $L \in \{20, 30, 40\}$).
+- test accuracy $\geq 0.97$ for $L \geq 30$.
 
 ---
 
-## Sanity checks intégrés
+## Runtime estimates (local)
 
-- `01_generate_mc.py` vérifie que toutes les configurations générées ont bien
-  la magnétisation cible (échoue si Kawasaki est mal codé).
-- `00_smoke_test.py` reproduit le pipeline complet sur $L = 8$, ce qui est
-  suffisant pour valider la chaîne sans coûter cher.
-- Énergie moyenne calculée et écrite dans chaque `.npz` — on peut comparer aux
-  valeurs connues (par exemple energy density $\to -2$ à $T \to 0$ pour
-  $M_0 = 0$ avec interfaces, et $\to 0$ à $T \to \infty$).
+With the default configuration (`n_configs_per_T = 20000`, 30 temperatures,
+$L \in \{20, 30, 40\}$):
+
+| Stage                  | Sequential (1 core) | Parallel (8 cores) |
+|------------------------|---------------------|--------------------|
+| MC generation, $L=20$  | ~5 min              | <1 min             |
+| MC generation, $L=30$  | ~25 min             | ~4 min             |
+| MC generation, $L=40$  | ~2.5 h              | ~20 min            |
+| CNN training, all $L$  | ~15 min (CPU)       | a few min on GPU   |
+| Analysis               | seconds             | seconds            |
+
+Timings measured on a typical modern laptop (Intel i7-class). For a quick
+look, reduce `n_configs_per_T` and the temperature grid in
+`configs/default.yaml`; reproducibility of the collapse holds qualitatively
+down to $\sim 5000$ configurations per $(L, T)$.
+
+---
+
+## Implementation choices vs.\ the paper
+
+| Choice                         | Paper          | This implementation                   |
+|--------------------------------|----------------|---------------------------------------|
+| Configurations per $(L, T)$    | $10^5$         | $2 \times 10^4$ (configurable)        |
+| System sizes $L$               | 20, 30, 40, 50 | 20, 30, 40 (configurable)             |
+| Temperature grid               | 23 points in $[1.0, 3.2]$ | 30 points in $[1.0, 3.5]$ (configurable) |
+| Convolutional padding          | unspecified    | circular (periodic)                   |
+| Snapshot decorrelation         | unspecified    | adaptive near $T_c$                   |
+| Stopping criterion             | 3 epochs without val improvement | same                |
+
+---
+
+## Sanity checks built into the pipeline
+
+- `scripts/01_generate_mc.py` verifies that every generated configuration
+  has the target magnetization — fails fast if the Kawasaki dynamics is
+  miscoded.
+- `scripts/00_smoke_test.py` reproduces the full pipeline on $L = 8$,
+  sufficient to validate the chain without significant cost.
+- Mean energy is computed and stored in every `.npz` and can be compared
+  to limiting cases (energy density $\to -2$ as $T \to 0$ for $M_0 = 0$
+  with straight interfaces, $\to 0$ as $T \to \infty$).
+
+---
+
+## Notes on the RBM part
+
+The original paper has a second half on Restricted Boltzmann Machines,
+which this repository does not currently include in production form.
+Reproductions of the RBM results (energy density tracking, magnetization
+drift, $P(E)$ pathology) used in the accompanying report were performed
+in standalone notebooks and are available on request.
+
+---
+
+## Reference
+
+A. Azizi and M. Pleimling, *A cautionary tale for machine learning generated
+configurations in presence of a conserved quantity*, **Scientific Reports
+11**:6395 (2021). [doi:10.1038/s41598-021-85683-8](https://doi.org/10.1038/s41598-021-85683-8)
+
+---
+
+## License
+
+MIT.
+
